@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const BACKEND = "https://seek-back-production.up.railway.app";
+const BACKEND = "https://seek-back-79vo.onrender.com";
 const FRONTEND = "https://seek-front-plum.vercel.app";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
