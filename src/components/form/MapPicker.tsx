@@ -12,7 +12,15 @@ export interface GeocodingData {
   countryCode?: string;
   country?: string;
   city?: string;
-  suburb?: string;
+  /**
+   * Candidats de nom de quartier, du plus probable au moins probable.
+   * OSM ne tague pas "suburb"/"neighbourhood" de façon cohérente au Sénégal :
+   * selon l'endroit, le nom de quartier précis se trouve dans l'un ou l'autre
+   * champ (l'autre contenant alors une commune/arrondissement plus large).
+   * On garde tous les candidats et on laisse l'appelant matcher contre sa
+   * propre liste de quartiers plutôt que de deviner lequel est le bon.
+   */
+  quartierCandidates: string[];
   adresse: string;
 }
 
@@ -25,12 +33,23 @@ async function reverseGeocode(lat: number, lng: number): Promise<GeocodingData |
     if (!res.ok) return null;
     const data = await res.json();
     const addr = data.address ?? {};
+
+    const quartierCandidates = [addr.neighbourhood, addr.suburb, addr.city_district].filter(
+      (v: unknown): v is string => Boolean(v)
+    );
+
+    const adressePrecise =
+      [addr.house_number, addr.road].filter(Boolean).join(", ") ||
+      quartierCandidates[0] ||
+      data.display_name ||
+      "";
+
     return {
       countryCode: addr.country_code?.toUpperCase(),
       country: addr.country,
       city: addr.city ?? addr.town ?? addr.village ?? addr.county ?? addr.state_district,
-      suburb: addr.suburb ?? addr.neighbourhood ?? addr.city_district,
-      adresse: data.display_name ?? "",
+      quartierCandidates,
+      adresse: adressePrecise,
     };
   } catch {
     return null;

@@ -360,11 +360,15 @@ export default function AddBien() {
   }, [pendingGeoMatch, villesList, selectedPays]);
 
   useEffect(() => {
-    if (!pendingGeoMatch?.suburb || !quartiersList.length || !selectedVille) return;
-    const needle = pendingGeoMatch.suburb.toLowerCase();
-    const match = quartiersList.find((q) =>
-      q.nom.toLowerCase().includes(needle) || needle.includes(q.nom.toLowerCase())
-    );
+    if (!pendingGeoMatch?.quartierCandidates?.length || !quartiersList.length || !selectedVille) return;
+    let match: Quartier | undefined;
+    for (const candidate of pendingGeoMatch.quartierCandidates) {
+      const needle = candidate.toLowerCase();
+      match = quartiersList.find((q) =>
+        q.nom.toLowerCase().includes(needle) || needle.includes(q.nom.toLowerCase())
+      );
+      if (match) break;
+    }
     if (match && match.id !== selectedQuartier?.id) {
       setSelectedQuartier(match);
     }
