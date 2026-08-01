@@ -98,7 +98,6 @@ const EtatDesLieuxReview = React.lazy(() => import("./pages/locataire/etats-des-
 const EtatsDesLieuxListLocataire = React.lazy(() => import("./pages/locataire/etats-des-lieux/EtatsDesLieuxList"));
 const OwnerNotificationsPage = React.lazy(() => import("./pages/owner/NotificationsPage"));
 const LocataireNotificationsPage = React.lazy(() => import("./pages/locataire/NotificationsPage"));
-const LocataireVerification = React.lazy(() => import("./pages/locataire/Verification"));
 const AdminNotificationsPage = React.lazy(() => import("./pages/admin/NotificationsPage"));
 const TemoignagesAdminPage = React.lazy(() => import("./pages/admin/TemoignagesAdmin"));
 const FeedbacksAdminPage = React.lazy(() => import("./pages/admin/FeedbacksAdmin"));
@@ -259,7 +258,6 @@ const App = () => (
                     <Route path="/locataire/documents" element={<DocumentsBien />} />
 
                     <Route path="/locataire/notifications" element={<LocataireNotificationsPage />} />
-                    <Route path="/locataire/verification" element={<LocataireVerification />} />
 
                     {/* Etats des Lieux Locataire */}
                     <Route path="/locataire/etats-des-lieux" element={<EtatsDesLieuxListLocataire />} />

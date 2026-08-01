@@ -15,7 +15,6 @@ import {
   ClipboardList,
   PanelLeft,
   PanelLeftClose,
-  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,7 +44,6 @@ const NAV_ITEMS = [
   { to: "/locataire/historique",        label: "Mes logements",      icon: History },
   { to: "/locataire/documents",         label: "Documents",          icon: FileText },
   { to: "/locataire/proprietaire",      label: "Mon propriétaire",   icon: UserCog },
-  { to: "/locataire/verification",      label: "Vérification KYC",   icon: ShieldCheck },
 ];
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
