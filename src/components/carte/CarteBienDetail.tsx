@@ -96,7 +96,18 @@ async function fetchOverpassEtabs(lat: number, lng: number): Promise<Etablisseme
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 18_000);
     try {
-      const res = await fetch(mirror + `?data=${encodeURIComponent(query)}`, { signal: controller.signal });
+      // POST (recommandé par Overpass) plutôt que GET : les miroirs publics
+      // rejettent souvent les requêtes GET avec querystring longue (406),
+      // surtout sous charge — le POST classique est mieux accepté.
+      const res = await fetch(mirror, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -120,7 +131,9 @@ async function fetchOverpassEtabs(lat: number, lng: number): Promise<Etablisseme
           } as Etablissement;
         })
         .filter((e): e is Etablissement => e !== null);
-      const byType = new Map<string, Etablissement>();
+      // `Map` est shadowé par l'import du composant react-map-gl plus haut dans ce
+      // fichier — on passe par `globalThis.Map` pour viser le vrai constructeur JS.
+      const byType = new globalThis.Map<string, Etablissement>();
       for (const e of all) {
         const existing = byType.get(e.type);
         if (!existing || (e.distance ?? Infinity) < (existing.distance ?? Infinity)) byType.set(e.type, e);
