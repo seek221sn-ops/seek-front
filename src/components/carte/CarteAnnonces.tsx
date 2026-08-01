@@ -14,7 +14,7 @@ const formatPrice = (price: number) =>
   new Intl.NumberFormat("fr-SN", { style: "currency", currency: "XOF" }).format(price);
 
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────────
 
 type BienWithCoords = Bien & { latitude: number; longitude: number };
 
