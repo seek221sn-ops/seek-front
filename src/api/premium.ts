@@ -60,7 +60,7 @@ export interface FormulesResponse {
   };
 }
 
-// Types pour l'historique des promotions
+// Types pour l'historique des mises en avant
 export interface PromotionHistory {
   id: string;
   bienId: string;
@@ -112,7 +112,22 @@ export interface HistoriquePaginatedResponse {
   };
 }
 
-// ─── API Calls ────────────────────────────────────────────────────────────────
+export interface PromotionStatus {
+  bienId: string;
+  estMisEnAvant: boolean;
+  dateDebutPromotion: string | null;
+  dateFinPromotion: string | null;
+  joursRestants: number;
+}
+
+export interface PlacesDisponibles {
+  placesMax: number;
+  placesUtilisees: number;
+  placesDisponibles: number;
+  prochaineLiberation: string | null;
+}
+
+// ─── API Calls : formules & paiement ──────────────────────────────────────────
 
 /**
  * Récupère les formules premium et les moyens de paiement disponibles
@@ -121,7 +136,7 @@ export const getFormulesPremium = (): Promise<{ formules: FormulePremium[]; moye
   api.get<{ status: string; message: string; data: { formules: FormulePremium[]; moyenPaiement: MoyenPaiement[] } }>("/formules").then((r) => r.data.data);
 
 /**
- * Simule le paiement et active la mise en avant premium
+ * Simule le paiement et active la mise en avant (vérifie d'abord la place disponible)
  */
 export const payerEtActiverPremium = (
   bienId: string,
@@ -149,6 +164,18 @@ export const arreterPremium = (
     .then((r) => r.data.data);
 
 /**
+ * Récupère le statut de mise en avant d'un bien
+ */
+export const getPromotionStatus = (bienId: string): Promise<PromotionStatus> =>
+  api.get<{ data: PromotionStatus }>(`/${bienId}/statut`).then((r) => r.data.data);
+
+/**
+ * Récupère l'état des places de mise en avant disponibles (5 max)
+ */
+export const getPlacesDisponibles = (): Promise<PlacesDisponibles> =>
+  api.get<{ data: PlacesDisponibles }>("/places").then((r) => r.data.data);
+
+/**
  * Récupère l'historique des mises en avant d'un bien
  */
 export const getHistoriqueMisesEnAvant = (
@@ -169,6 +196,43 @@ export const getHistoriquePaiementsPremium = (
     .get<{ data: { data: PromotionHistory[]; pagination: { page: number; limit: number; total: number; totalPages: number } } }>("/historique", {
       params: { page, limit },
     })
+    .then((r) => r.data.data);
+
+// ─── API Calls : page d'accueil (public) ──────────────────────────────────────
+
+export interface AnnonceMiseEnAvant {
+  id: string;
+  titre: string | null;
+  description: string | null;
+  prix: number | null;
+  photos: string[];
+  ville: string | null;
+  quartier: string | null;
+  surface: number | null;
+  nbChambres: number | null;
+  nbSdb: number | null;
+  typeLogement: { id: string; nom: string; slug: string } | null;
+  typeTransaction: { id: string; nom: string; slug: string } | null;
+  statutBien: { id: string; nom: string; slug: string } | null;
+  estMisEnAvant: boolean;
+  dateDebutPromotion: string | null;
+  dateFinPromotion: string | null;
+  proprietaire: { id: string; prenom: string; nom: string; telephone: string; email: string | null; statutVerification?: "NOT_VERIFIED" | "PENDING" | "VERIFIED" | "REJECTED" };
+  nombreAnnoncesProprietaire?: number;
+}
+
+export interface MiseEnAvantResponse {
+  annonces: AnnonceMiseEnAvant[];
+  total: number;
+  placesDisponibles: number;
+}
+
+/**
+ * Récupère les annonces mises en avant pour la page d'accueil (public)
+ */
+export const fetchAnnoncesMiseEnAvant = (limit: number = 5): Promise<MiseEnAvantResponse> =>
+  api
+    .get<{ data: MiseEnAvantResponse }>("/accueil", { params: { limit } })
     .then((r) => r.data.data);
 
 // ─── Admin CRUD FormulePremium ────────────────────────────────────────────────
@@ -194,7 +258,7 @@ export const adminUpdateFormule = (id: string, data: Partial<FormulePremiumFull>
 export const adminDeleteFormule = (id: string): Promise<void> =>
   api.delete(`/admin/formules/${id}`).then(() => undefined);
 
-// ─── Admin historique promotions ──────────────────────────────────────────────
+// ─── Admin historique / stats mise en avant ───────────────────────────────────
 
 export interface AdminPromotionStats {
   total: number;

@@ -1,64 +1,27 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, TrendingDown, AlertTriangle } from "lucide-react";
+import { Heart } from "lucide-react";
 import { useFavoris } from "@/hooks/useFavoris";
-import { useFavorisList, useRemoveFavori, useSyncSnapshot } from "@/hooks/useFavorisList";
+import { useFavorisList, useRemoveFavori } from "@/hooks/useFavorisList";
 import type { FavoriItem } from "@/api/favori";
 import PropertyCard from "@/components/PropertyCard";
 import ScrollToTop from "@/components/ui/ScrollToTop";
 import FavorisAuthModal from "@/components/FavorisAuthModal";
 
-const formatPrice = (p: number) =>
-  new Intl.NumberFormat("fr-SN", { style: "currency", currency: "XOF" }).format(p);
-
-// ─── Carte favori avec détection de changements ────────────────────────────────
+// ─── Carte favori ───────────────────────────────────────────────────────────────
 
 function FavoriCard({ item }: { item: FavoriItem }) {
   const removeMutation = useRemoveFavori();
-  const syncMutation = useSyncSnapshot();
-  const { changements, bien } = item;
-  const isUnavailable = changements.bienSuppr;
-  const hasChanges = changements.prixChange || changements.statutChange;
+  const { bien, bienSuppr } = item;
 
   return (
     <div className="relative flex flex-col gap-0 h-full">
-      {hasChanges && (
-        <div className="rounded-t-2xl px-3 py-2 text-xs font-medium flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 border-b-0">
-          {changements.prixChange ? (
-            <>
-              <TrendingDown className="w-3.5 h-3.5 flex-shrink-0 text-green-600" />
-              Prix modifié
-              {changements.nouveauPrix !== null && (
-                <span className="text-green-700 font-semibold">{formatPrice(changements.nouveauPrix)}</span>
-              )}
-              <button
-                onClick={() => syncMutation.mutate(item.bienId)}
-                className="ml-auto text-amber-600 hover:underline whitespace-nowrap"
-              >
-                Marquer comme vu
-              </button>
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-              Statut modifié : {changements.nouveauStatut}
-              <button
-                onClick={() => syncMutation.mutate(item.bienId)}
-                className="ml-auto hover:underline whitespace-nowrap"
-              >
-                Marquer comme vu
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
       {/* Carte - grisée + overlay hover si indisponible */}
-      <div className={`relative group ${hasChanges ? "ring-2 ring-amber-300 rounded-b-2xl" : ""}`}>
-        <div className={isUnavailable ? "grayscale opacity-50 pointer-events-none select-none" : ""}>
+      <div className="relative group">
+        <div className={bienSuppr ? "grayscale opacity-50 pointer-events-none select-none" : ""}>
           <PropertyCard property={bien} isApiData showFavoriteButton={false} />
         </div>
-        {isUnavailable && (
+        {bienSuppr && (
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-900/30 rounded-2xl">
             <span className="text-white text-sm font-semibold text-center px-4 leading-snug">
               Annonce retirée ou non disponible
@@ -86,9 +49,6 @@ export default function FavorisPage() {
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const displayCount = apiFavoris?.length ?? count;
-  const hasChanges = apiFavoris?.some(
-    (f) => f.changements.prixChange || f.changements.statutChange || f.changements.bienSuppr
-  );
 
   return (
     <div className="min-h-screen bg-[#F8F5EE]">
@@ -100,11 +60,6 @@ export default function FavorisPage() {
           <p className="text-[#D4A843] font-bold text-xs uppercase tracking-wider mb-1">Mon espace</p>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             Mes favoris
-            {hasChanges && (
-              <span className="text-xs bg-amber-500 text-white rounded-full px-2.5 py-0.5 font-semibold">
-                Mises à jour
-              </span>
-            )}
           </h1>
           {isAuthenticated && (
             <p className="text-white/50 text-sm mt-1">
@@ -131,7 +86,7 @@ export default function FavorisPage() {
               Connectez-vous pour voir vos favoris
             </h2>
             <p className="text-slate-500 text-sm max-w-xs mb-7">
-              Créez un compte ou connectez-vous pour sauvegarder des annonces et suivre leur évolution.
+              Créez un compte ou connectez-vous pour sauvegarder des annonces.
             </p>
             <button
               onClick={() => setShowAuthModal(true)}

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchAnnoncesMiseEnAvant, type AnnonceMiseEnAvant, type MiseEnAvantResponse } from "@/api/promotion";
+import { fetchAnnoncesMiseEnAvant, type AnnonceMiseEnAvant, type MiseEnAvantResponse } from "@/api/premium";
 
 // Places plafonnées (5), pas de rotation - refetch périodique pour rester à jour
 const REFETCH_INTERVAL_MS = 10 * 60 * 1000;

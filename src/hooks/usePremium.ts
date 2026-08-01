@@ -3,6 +3,8 @@ import {
   getFormulesPremium,
   payerEtActiverPremium,
   arreterPremium,
+  getPromotionStatus,
+  getPlacesDisponibles,
   adminGetFormules,
   adminCreateFormule,
   adminUpdateFormule,
@@ -22,6 +24,27 @@ import {
   type Transaction
 } from "@/api/transaction";
 import { toast } from "sonner";
+
+/**
+ * Hook pour récupérer l'état des places de mise en avant disponibles (5 max)
+ */
+export const usePlacesDisponibles = () => {
+  return useQuery({
+    queryKey: ["places-mise-en-avant"],
+    queryFn: getPlacesDisponibles,
+  });
+};
+
+/**
+ * Hook pour récupérer le statut de mise en avant d'un bien
+ */
+export const usePromotionStatus = (bienId: string) => {
+  return useQuery({
+    queryKey: ["promotion-status", bienId],
+    queryFn: () => getPromotionStatus(bienId),
+    enabled: !!bienId,
+  });
+};
 
 /**
  * Hook pour récupérer les formules premium et les moyens de paiement

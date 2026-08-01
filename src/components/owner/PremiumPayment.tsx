@@ -1,7 +1,14 @@
 import { useState, useEffect } from "react";
 import { Star, Clock, AlertCircle, CheckCircle, XCircle, Sparkles, X, Smartphone, AlertTriangle } from "lucide-react";
-import { usePromotionStatus, usePlacesDisponibles } from "@/hooks/usePromotion";
-import { useFormulesPremium, usePayerPremium, useArreterPremium, type FormulePremium, type MoyenPaiement } from "@/hooks/usePremium";
+import {
+  usePromotionStatus,
+  usePlacesDisponibles,
+  useFormulesPremium,
+  usePayerPremium,
+  useArreterPremium,
+  type FormulePremium,
+  type MoyenPaiement,
+} from "@/hooks/usePremium";
 import { useOwnerAuth } from "@/context/OwnerAuthContext";
 
 interface PremiumPaymentProps {

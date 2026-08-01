@@ -10,29 +10,17 @@ const api = axios.create({
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface Changements {
-  prixChange: boolean;
-  nouveauPrix: number | null;
-  prixAncienSnapshot: number | null;
-  statutChange: boolean;
-  nouveauStatut: string | null;
-  bienSuppr: boolean;
-}
-
 export interface FavoriItem {
   id: string;
   bienId: string;
   createdAt: string;
-  prixSnapshot: number | null;
-  statutSnapshot: string | null;
-  actifSnapshot: boolean;
   bien: Bien;
-  changements: Changements;
+  bienSuppr: boolean;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-/** Liste des favoris avec changements détectés */
+/** Liste des favoris */
 export const getFavorisApi = async (): Promise<FavoriItem[]> => {
   const { data } = await api.get("/");
   return data.data;
@@ -53,9 +41,4 @@ export const toggleFavoriApi = async (bienId: string): Promise<{ action: "added"
 /** Supprimer un favori */
 export const removeFavoriApi = async (bienId: string): Promise<void> => {
   await api.delete(`/${bienId}`);
-};
-
-/** Marquer les changements d'un favori comme vus (reset snapshot) */
-export const syncSnapshotApi = async (bienId: string): Promise<void> => {
-  await api.patch(`/${bienId}/snapshot`);
 };
