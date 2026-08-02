@@ -29,6 +29,8 @@ export interface Champ {
   categorieId: string;
   categorie: { id: string; nom: string };
   actif: boolean;
+  /** Non nul pour un champ "système" (Surface, Chambres...) mappé à une colonne Bien — non modifiable/supprimable */
+  cleSysteme: string | null;
   createdAt: string;
   updatedAt: string;
 }

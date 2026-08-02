@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import Breadcrumb from "@/components/ui/Breadcrumb";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -18,8 +18,14 @@ import { useCreateBien, useBienById } from "@/hooks/useBien";
 import { useBailActif } from "@/hooks/useBail";
 import { usePays, useVilles, useQuartiers } from "@/hooks/useGeo";
 import { useChampsForTypeLogement } from "@/hooks/useTypeLogementChamp";
+import { useEquipementsForTypeLogement } from "@/hooks/useTypeLogementEquipement";
+import { useMeublesForTypeLogement } from "@/hooks/useTypeLogementMeuble";
 import DynamicForm, { validateDynamicValues } from "@/components/form/DynamicForm";
 import { VerificationBanner } from "@/components/owner/VerificationAlert";
+import ConfirmModal from "@/components/ui/ConfirmModal";
+import { fetchChampsForTypeLogement } from "@/api/typeLogementChamp";
+import { fetchEquipementsForTypeLogement } from "@/api/typeLogementEquipement";
+import { fetchMeublesForTypeLogement } from "@/api/typeLogementMeuble";
 import type { TypeLogement } from "@/api/typeLogement";
 import type { TypeTransaction } from "@/api/typeTransaction";
 import type { StatutBien } from "@/api/statutBien";
@@ -227,6 +233,41 @@ export default function AddBien() {
   const [champsValeurs,     setChampsValeurs]     = useState<Record<string, string>>({});
   const [champsErrors,      setChampsErrors]      = useState<Record<string, string>>({});
   const { data: typeLogementChamps = [], isLoading: champsLoading } = useChampsForTypeLogement(selectedType?.id ?? "");
+  const { data: typeLogementEquipements = [], isLoading: typeEqLoading } = useEquipementsForTypeLogement(selectedType?.id ?? "");
+  const { data: typeLogementMeubles = [], isLoading: typeMblLoading } = useMeublesForTypeLogement(selectedType?.id ?? "");
+
+  // Champs "système" (Surface, Chambres...) mappés à des colonnes Bien, vs champs
+  // vraiment dynamiques (BienChampValeur) — voir bienChampsAuthorization.service.ts côté backend.
+  const systemChampsByKey = useMemo(() => {
+    const map = new Map<string, (typeof typeLogementChamps)[number]>();
+    for (const cfg of typeLogementChamps) {
+      if (cfg.champ.cleSysteme) map.set(cfg.champ.cleSysteme, cfg);
+    }
+    return map;
+  }, [typeLogementChamps]);
+  const customChamps = useMemo(
+    () => typeLogementChamps.filter((cfg) => !cfg.champ.cleSysteme),
+    [typeLogementChamps]
+  );
+  const authorizedEquipementIds = useMemo(
+    () => new Set(typeLogementEquipements.map((c) => c.equipementId)),
+    [typeLogementEquipements]
+  );
+  const authorizedMeubleIds = useMemo(
+    () => new Set(typeLogementMeubles.map((c) => c.meubleId)),
+    [typeLogementMeubles]
+  );
+
+  // ── Changement de type de bien : confirmation si des données deviendraient incompatibles ──
+  const [pendingType, setPendingType] = useState<TypeLogement | null>(null);
+  const [pendingTypeConfig, setPendingTypeConfig] = useState<{
+    systemKeys: Set<string>;
+    customChampIds: Set<string>;
+    equipementIds: Set<string>;
+    meubleIds: Set<string>;
+  } | null>(null);
+  const [showTypeChangeConfirm, setShowTypeChangeConfirm] = useState(false);
+  const [typeChangeLoading, setTypeChangeLoading] = useState(false);
 
   // ── Onglet 5 : Médias ──
   const [photos,            setPhotos]            = useState<PhotoFile[]>([]);
@@ -524,6 +565,102 @@ export default function AddBien() {
     });
   };
 
+  // ── Changement de type de bien ──
+  // Le type de bien détermine quels champs/équipements/meubles sont disponibles.
+  // Si des données déjà saisies deviendraient incompatibles avec le nouveau type,
+  // on demande confirmation avant de les réinitialiser (rien n'est perdu si on annule,
+  // et rien n'est envoyé au backend tant que le formulaire n'est pas sauvegardé).
+  const handleSelectType = async (t: TypeLogement) => {
+    if (selectedType?.id === t.id) return;
+
+    if (!selectedType) {
+      setSelectedType(t);
+      return;
+    }
+
+    setTypeChangeLoading(true);
+    try {
+      const [newChamps, newEquipements, newMeubles] = await Promise.all([
+        fetchChampsForTypeLogement(t.id),
+        fetchEquipementsForTypeLogement(t.id),
+        fetchMeublesForTypeLogement(t.id),
+      ]);
+      const systemKeys = new Set(
+        newChamps.filter((c) => c.champ.cleSysteme).map((c) => c.champ.cleSysteme as string)
+      );
+      const customChampIds = new Set(newChamps.filter((c) => !c.champ.cleSysteme).map((c) => c.champId));
+      const equipementIds = new Set(newEquipements.map((e) => e.equipementId));
+      const meubleIds = new Set(newMeubles.map((m) => m.meubleId));
+
+      const incompatible =
+        (!!surface.trim() && !systemKeys.has("surface")) ||
+        (!!etage.trim() && !systemKeys.has("etage")) ||
+        (nbChambres > 0 && !systemKeys.has("nbChambres")) ||
+        (nbCuisines > 0 && !systemKeys.has("nbCuisines")) ||
+        (nbSalons > 0 && !systemKeys.has("nbSalons")) ||
+        (nbSdb > 0 && !systemKeys.has("nbSdb")) ||
+        (nbWc > 0 && !systemKeys.has("nbWc")) ||
+        (meuble && !systemKeys.has("meuble")) ||
+        (parking && !systemKeys.has("parking")) ||
+        (ascenseur && !systemKeys.has("ascenseur")) ||
+        (fumeurs && !systemKeys.has("fumeurs")) ||
+        (animaux && !systemKeys.has("animaux")) ||
+        Object.entries(champsValeurs).some(([champId, v]) => v.trim() !== "" && !customChampIds.has(champId)) ||
+        Array.from(selectedEqs).some((id) => !equipementIds.has(id)) ||
+        Array.from(selectedMeubles).some((id) => !meubleIds.has(id));
+
+      if (!incompatible) {
+        setSelectedType(t);
+        return;
+      }
+
+      setPendingType(t);
+      setPendingTypeConfig({ systemKeys, customChampIds, equipementIds, meubleIds });
+      setShowTypeChangeConfirm(true);
+    } catch {
+      toast.error("Impossible de vérifier la compatibilité du nouveau type. Réessayez.");
+    } finally {
+      setTypeChangeLoading(false);
+    }
+  };
+
+  const confirmTypeChange = () => {
+    if (!pendingType || !pendingTypeConfig) return;
+    const { systemKeys, customChampIds, equipementIds, meubleIds } = pendingTypeConfig;
+
+    if (!systemKeys.has("surface"))    setSurface("");
+    if (!systemKeys.has("etage"))      setEtage("");
+    if (!systemKeys.has("nbChambres")) setNbChambres(0);
+    if (!systemKeys.has("nbCuisines")) setNbCuisines(0);
+    if (!systemKeys.has("nbSalons"))   setNbSalons(0);
+    if (!systemKeys.has("nbSdb"))      setNbSdb(0);
+    if (!systemKeys.has("nbWc"))       setNbWc(0);
+    if (!systemKeys.has("meuble"))     setMeuble(false);
+    if (!systemKeys.has("parking"))    setParking(false);
+    if (!systemKeys.has("ascenseur"))  setAscenseur(false);
+    if (!systemKeys.has("fumeurs"))    setFumeurs(false);
+    if (!systemKeys.has("animaux"))    setAnimaux(false);
+
+    setChampsValeurs((prev) => {
+      const next: Record<string, string> = {};
+      for (const [champId, v] of Object.entries(prev)) if (customChampIds.has(champId)) next[champId] = v;
+      return next;
+    });
+    setSelectedEqs((prev) => new Set(Array.from(prev).filter((id) => equipementIds.has(id))));
+    setSelectedMeubles((prev) => new Set(Array.from(prev).filter((id) => meubleIds.has(id))));
+
+    setSelectedType(pendingType);
+    setPendingType(null);
+    setPendingTypeConfig(null);
+    setShowTypeChangeConfirm(false);
+  };
+
+  const cancelTypeChange = () => {
+    setPendingType(null);
+    setPendingTypeConfig(null);
+    setShowTypeChangeConfirm(false);
+  };
+
   // ── Validation par tab ──
   const validateTab = (tabId: string): boolean => {
     const errs: Record<string, string> = {};
@@ -541,7 +678,7 @@ export default function AddBien() {
       if (!selectedVille) errs.region = "Choisissez une région";
     }
     if (tabId === "specifiques") {
-      const dynErrs = validateDynamicValues(typeLogementChamps, champsValeurs);
+      const dynErrs = validateDynamicValues(customChamps, champsValeurs);
       if (Object.keys(dynErrs).length > 0) {
         setChampsErrors(dynErrs);
         return false;
@@ -759,8 +896,9 @@ export default function AddBien() {
                         <button
                           key={t.id}
                           type="button"
-                          onClick={() => setSelectedType(t)}
-                          className={`flex flex-col items-start p-4 rounded-xl border-2 text-left transition-all ${sel ? "border-[#D4A843] bg-[#D4A843]/5 shadow-sm" : "border-slate-100 bg-slate-50 hover:border-slate-200 hover:bg-white"}`}
+                          disabled={typeChangeLoading}
+                          onClick={() => handleSelectType(t)}
+                          className={`flex flex-col items-start p-4 rounded-xl border-2 text-left transition-all disabled:opacity-60 ${sel ? "border-[#D4A843] bg-[#D4A843]/5 shadow-sm" : "border-slate-100 bg-slate-50 hover:border-slate-200 hover:bg-white"}`}
                         >
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2.5 ${sel ? "bg-[#D4A843] text-white" : "bg-white text-slate-400 border border-slate-100"}`}>
                             <Icon className="w-4 h-4" />
@@ -996,50 +1134,84 @@ export default function AddBien() {
               <div className="w-7 h-7 rounded-lg bg-[#D4A843]/10 flex items-center justify-center">
                 <Ruler className="w-3.5 h-3.5 text-[#D4A843]" />
               </div>
-              <h2 className="text-sm font-semibold text-[#0C1A35]">Caractéristiques techniques</h2>
+              <div>
+                <h2 className="text-sm font-semibold text-[#0C1A35]">Caractéristiques techniques</h2>
+                {selectedType && (
+                  <p className="text-xs text-slate-400 mt-0.5">Champs configurés pour : {selectedType.nom}</p>
+                )}
+              </div>
             </div>
-            <div className="p-6 space-y-5">
-              {/* Surface + Étage */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>Surface (m²)</label>
-                  <input
-                    type="number"
-                    value={surface}
-                    onChange={(e) => setSurface(e.target.value)}
-                    placeholder="ex : 80"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>Étage <span className="text-slate-400 font-normal">(0 = RDC)</span></label>
-                  <input
-                    type="number"
-                    value={etage}
-                    onChange={(e) => setEtage(e.target.value)}
-                    placeholder="ex : 2"
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-50 space-y-4">
-                {[
-                  { label: "Chambres", sub: "Pièces à coucher", val: nbChambres, set: setNbChambres },
-                  { label: "Cuisine(s)", sub: "Pièces cuisine", val: nbCuisines, set: setNbCuisines },
-                  { label: "Salon(s)", sub: "Salles de séjour", val: nbSalons, set: setNbSalons },
-                  { label: "Douche(s) / SDB", sub: "Salles d'eau", val: nbSdb, set: setNbSdb },
-                  { label: "WC", sub: "Toilettes", val: nbWc, set: setNbWc },
-                ].map(({ label, sub, val, set }) => (
-                  <div key={label} className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{label}</p>
-                      <p className="text-xs text-slate-400">{sub}</p>
+            <div className="p-6">
+              {!selectedType ? (
+                <p className="text-sm text-slate-400">
+                  Sélectionnez d'abord un type de bien dans l'onglet "Infos générales".
+                </p>
+              ) : (
+                <div className="space-y-5">
+                  {/* Surface + Étage */}
+                  {(systemChampsByKey.has("surface") || systemChampsByKey.has("etage")) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {systemChampsByKey.has("surface") && (
+                        <div>
+                          <label className={labelCls}>
+                            Surface (m²)
+                            {systemChampsByKey.get("surface")!.obligatoire && <span className="text-red-400 ml-0.5">*</span>}
+                          </label>
+                          <input
+                            type="number"
+                            value={surface}
+                            onChange={(e) => setSurface(e.target.value)}
+                            placeholder="ex : 80"
+                            className={inputCls}
+                          />
+                        </div>
+                      )}
+                      {systemChampsByKey.has("etage") && (
+                        <div>
+                          <label className={labelCls}>Étage <span className="text-slate-400 font-normal">(0 = RDC)</span></label>
+                          <input
+                            type="number"
+                            value={etage}
+                            onChange={(e) => setEtage(e.target.value)}
+                            placeholder="ex : 2"
+                            className={inputCls}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <Counter value={val} onChange={set} min={0} max={20} />
-                  </div>
-                ))}
-              </div>
+                  )}
+
+                  {(() => {
+                    const pieces = [
+                      { key: "nbChambres", label: "Chambres", sub: "Pièces à coucher", val: nbChambres, set: setNbChambres },
+                      { key: "nbCuisines", label: "Cuisine(s)", sub: "Pièces cuisine", val: nbCuisines, set: setNbCuisines },
+                      { key: "nbSalons", label: "Salon(s)", sub: "Salles de séjour", val: nbSalons, set: setNbSalons },
+                      { key: "nbSdb", label: "Douche(s) / SDB", sub: "Salles d'eau", val: nbSdb, set: setNbSdb },
+                      { key: "nbWc", label: "WC", sub: "Toilettes", val: nbWc, set: setNbWc },
+                    ].filter((p) => systemChampsByKey.has(p.key));
+                    if (pieces.length === 0) return null;
+                    return (
+                      <div className="pt-3 border-t border-slate-50 space-y-4">
+                        {pieces.map(({ key, label, sub, val, set }) => (
+                          <div key={key} className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-slate-700">{label}</p>
+                              <p className="text-xs text-slate-400">{sub}</p>
+                            </div>
+                            <Counter value={val} onChange={set} min={0} max={20} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {systemChampsByKey.size === 0 && (
+                    <p className="text-sm text-slate-400">
+                      Aucune caractéristique technique configurée pour ce type de bien.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1067,7 +1239,7 @@ export default function AddBien() {
                 </p>
               ) : (
                 <DynamicForm
-                  champs={typeLogementChamps}
+                  champs={customChamps}
                   values={champsValeurs}
                   errors={champsErrors}
                   onChange={(champId, value) => {
@@ -1227,62 +1399,77 @@ export default function AddBien() {
         {tab === "options" && (
           <div className="space-y-6">
             {/* Options principales */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-[#D4A843]/10 flex items-center justify-center">
-                  <Zap className="w-3.5 h-3.5 text-[#D4A843]" />
-                </div>
-                <h2 className="text-sm font-semibold text-[#0C1A35]">Options du bien</h2>
+            {!selectedType ? (
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden p-6">
+                <p className="text-sm text-slate-400">
+                  Sélectionnez d'abord un type de bien dans l'onglet "Infos générales".
+                </p>
               </div>
-              <div className="p-6 space-y-3">
-                <Toggle checked={meuble}    onChange={setMeuble}    label="Bien meublé" />
-                <Toggle checked={parking}   onChange={setParking}   label="Place de parking" />
-                <Toggle checked={ascenseur} onChange={setAscenseur} label="Ascenseur dans le bâtiment" />
-                <div className="pt-3 border-t border-slate-50">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Règlement intérieur</p>
-                  <div className="space-y-3">
-                    <label className="flex items-center justify-between cursor-pointer group">
-                      <div className="flex items-center gap-2">
-                        <Cigarette className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">Fumeurs acceptés</span>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={fumeurs}
-                        onClick={() => setFumeurs(!fumeurs)}
-                        style={{ width: "40px", height: "22px" }}
-                        className={`relative rounded-full flex-shrink-0 transition-colors duration-200 ${fumeurs ? "bg-[#D4A843]" : "bg-slate-200"}`}
-                      >
-                        <span
-                          style={{ width: "18px", height: "18px" }}
-                          className={`absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${fumeurs ? "translate-x-[18px]" : "translate-x-0"}`}
-                        />
-                      </button>
-                    </label>
-                    <label className="flex items-center justify-between cursor-pointer group">
-                      <div className="flex items-center gap-2">
-                        <PawPrint className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">Animaux acceptés</span>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={animaux}
-                        onClick={() => setAnimaux(!animaux)}
-                        style={{ width: "40px", height: "22px" }}
-                        className={`relative rounded-full flex-shrink-0 transition-colors duration-200 ${animaux ? "bg-[#D4A843]" : "bg-slate-200"}`}
-                      >
-                        <span
-                          style={{ width: "18px", height: "18px" }}
-                          className={`absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${animaux ? "translate-x-[18px]" : "translate-x-0"}`}
-                        />
-                      </button>
-                    </label>
+            ) : (systemChampsByKey.has("meuble") || systemChampsByKey.has("parking") || systemChampsByKey.has("ascenseur") ||
+                 systemChampsByKey.has("fumeurs") || systemChampsByKey.has("animaux")) && (
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#D4A843]/10 flex items-center justify-center">
+                    <Zap className="w-3.5 h-3.5 text-[#D4A843]" />
                   </div>
+                  <h2 className="text-sm font-semibold text-[#0C1A35]">Options du bien</h2>
+                </div>
+                <div className="p-6 space-y-3">
+                  {systemChampsByKey.has("meuble")    && <Toggle checked={meuble}    onChange={setMeuble}    label="Bien meublé" />}
+                  {systemChampsByKey.has("parking")   && <Toggle checked={parking}   onChange={setParking}   label="Place de parking" />}
+                  {systemChampsByKey.has("ascenseur") && <Toggle checked={ascenseur} onChange={setAscenseur} label="Ascenseur dans le bâtiment" />}
+                  {(systemChampsByKey.has("fumeurs") || systemChampsByKey.has("animaux")) && (
+                    <div className="pt-3 border-t border-slate-50">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Règlement intérieur</p>
+                      <div className="space-y-3">
+                        {systemChampsByKey.has("fumeurs") && (
+                          <label className="flex items-center justify-between cursor-pointer group">
+                            <div className="flex items-center gap-2">
+                              <Cigarette className="w-4 h-4 text-slate-400" />
+                              <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">Fumeurs acceptés</span>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={fumeurs}
+                              onClick={() => setFumeurs(!fumeurs)}
+                              style={{ width: "40px", height: "22px" }}
+                              className={`relative rounded-full flex-shrink-0 transition-colors duration-200 ${fumeurs ? "bg-[#D4A843]" : "bg-slate-200"}`}
+                            >
+                              <span
+                                style={{ width: "18px", height: "18px" }}
+                                className={`absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${fumeurs ? "translate-x-[18px]" : "translate-x-0"}`}
+                              />
+                            </button>
+                          </label>
+                        )}
+                        {systemChampsByKey.has("animaux") && (
+                          <label className="flex items-center justify-between cursor-pointer group">
+                            <div className="flex items-center gap-2">
+                              <PawPrint className="w-4 h-4 text-slate-400" />
+                              <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">Animaux acceptés</span>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={animaux}
+                              onClick={() => setAnimaux(!animaux)}
+                              style={{ width: "40px", height: "22px" }}
+                              className={`relative rounded-full flex-shrink-0 transition-colors duration-200 ${animaux ? "bg-[#D4A843]" : "bg-slate-200"}`}
+                            >
+                              <span
+                                style={{ width: "18px", height: "18px" }}
+                                className={`absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${animaux ? "translate-x-[18px]" : "translate-x-0"}`}
+                              />
+                            </button>
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Meubles (si meublé) - avant équipements */}
             {meuble && (
@@ -1301,15 +1488,17 @@ export default function AddBien() {
                   )}
                 </div>
                 <div className="p-6">
-                  {mblLoading ? (
+                  {mblLoading || typeMblLoading ? (
                     <div className="flex items-center gap-2 text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Chargement…</span></div>
-                  ) : meubles.length === 0 ? (
-                    <p className="text-sm text-slate-400">Aucun meuble disponible.</p>
+                  ) : meubles.filter((m) => authorizedMeubleIds.has(m.id)).length === 0 ? (
+                    <p className="text-sm text-slate-400">Aucun meuble disponible pour ce type de bien.</p>
                   ) : (() => {
-                    const filtered = meubles.filter((m: Meuble) =>
-                      m.nom.toLowerCase().includes(mblSearch.toLowerCase()) ||
-                      m.categorie?.nom.toLowerCase().includes(mblSearch.toLowerCase())
-                    );
+                    const filtered = meubles
+                      .filter((m: Meuble) => authorizedMeubleIds.has(m.id))
+                      .filter((m: Meuble) =>
+                        m.nom.toLowerCase().includes(mblSearch.toLowerCase()) ||
+                        m.categorie?.nom.toLowerCase().includes(mblSearch.toLowerCase())
+                      );
                     const grouped = filtered.reduce((acc: Record<string, Meuble[]>, m: Meuble) => {
                       const cat = m.categorie?.nom ?? "Autres";
                       if (!acc[cat]) acc[cat] = [];
@@ -1366,6 +1555,7 @@ export default function AddBien() {
             )}
 
             {/* Équipements */}
+            {selectedType && (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
@@ -1381,12 +1571,14 @@ export default function AddBien() {
                 )}
               </div>
               <div className="p-6">
-                {eqLoading ? (
+                {eqLoading || typeEqLoading ? (
                   <div className="flex items-center gap-2 text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Chargement…</span></div>
-                ) : equipements.length === 0 ? (
-                  <p className="text-sm text-slate-400">Aucun équipement disponible.</p>
+                ) : equipements.filter((eq) => authorizedEquipementIds.has(eq.id)).length === 0 ? (
+                  <p className="text-sm text-slate-400">Aucun équipement disponible pour ce type de bien.</p>
                 ) : (() => {
-                  const filtered = equipements.filter((eq: Equipement) =>
+                  const filtered = equipements
+                    .filter((eq: Equipement) => authorizedEquipementIds.has(eq.id))
+                    .filter((eq: Equipement) =>
                     eq.nom.toLowerCase().includes(eqSearch.toLowerCase()) ||
                     eq.categorie?.nom.toLowerCase().includes(eqSearch.toLowerCase())
                   );
@@ -1443,6 +1635,7 @@ export default function AddBien() {
                 })()}
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -1772,6 +1965,17 @@ export default function AddBien() {
         </div>
 
       </form>
+
+      <ConfirmModal
+        open={showTypeChangeConfirm}
+        title="Changer de type de bien ?"
+        message="Le changement de type de bien modifiera les informations disponibles dans le formulaire. Certaines données actuellement saisies ne seront plus compatibles avec le nouveau type de bien."
+        confirmLabel="Continuer"
+        cancelLabel="Annuler"
+        variant="warning"
+        onConfirm={confirmTypeChange}
+        onCancel={cancelTypeChange}
+      />
     </div>
   );
 }
