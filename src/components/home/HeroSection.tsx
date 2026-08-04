@@ -59,6 +59,14 @@ const HeroSection = () => {
       return;
     }
 
+    const mn = parseInt(budgetMin.replace(/\u00a0/g, ""), 10);
+    const mx = parseInt(budgetMax.replace(/\u00a0/g, ""), 10);
+
+    if (!isNaN(mn) && !isNaN(mx) && mn > mx) {
+      setFormError("Le budget minimum ne peut pas être supérieur au budget maximum.");
+      return;
+    }
+
     const params = new URLSearchParams();
 
     if (selectedPoint) {
@@ -75,8 +83,6 @@ const HeroSection = () => {
 
     if (propertyType) params.set("typeLogement", propertyType);
 
-    const mn = parseInt(budgetMin.replace(/\u00a0/g, ""), 10);
-    const mx = parseInt(budgetMax.replace(/\u00a0/g, ""), 10);
     if (!isNaN(mn) && mn > 0) params.set("prixMin", String(mn));
     if (!isNaN(mx) && mx > 0) params.set("prixMax", String(mx));
 
