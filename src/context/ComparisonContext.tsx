@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import type { Bien } from "@/api/bien";
+import { toast } from "sonner";
 
 const MAX_ITEMS = 3;
 
@@ -24,7 +25,16 @@ export function ComparisonProvider({ children }: { children: ReactNode }) {
       if (prev.some((b) => b.id === bien.id)) {
         return prev.filter((b) => b.id !== bien.id);
       }
-      if (prev.length >= MAX_ITEMS) return prev;
+
+      if (prev.length > 0 && prev[0].typeLogementId !== bien.typeLogementId) {
+        toast.error("Vous ne pouvez comparer que des biens du même type.");
+        return prev;
+      }
+
+      if (prev.length >= MAX_ITEMS) {
+        toast.error("Vous ne pouvez comparer que 3 biens à la fois.");
+        return prev;
+      }
       return [...prev, bien];
     });
   }, []);
