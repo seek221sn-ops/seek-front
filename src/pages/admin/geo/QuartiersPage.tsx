@@ -10,7 +10,6 @@ import {
   useUpdateQuartier,
   useDeleteQuartier,
 } from "@/hooks/useGeo";
-import { useNominatimQuartier } from "@/hooks/useNominatimQuartier";
 import type { Pays, Ville, Quartier } from "@/api/geo";
 import ConfirmModal from "@/components/admin/ConfirmModal";
 
@@ -22,70 +21,6 @@ const inputCls =
   "focus:border-[#D4A843]/60 focus:bg-white transition-all";
 
 const labelCls = "block text-xs font-medium text-slate-500 mb-1.5";
-
-// ─── Sélecteur de nom avec autocomplete Nominatim ─────────────────────────────
-
-function NominatimInput({
-  value,
-  countryCode,
-  onChange,
-  onSelect,
-}: {
-  value: string;
-  countryCode: string;
-  onChange: (v: string) => void;
-  onSelect: (lat: number, lon: number, nom: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const { suggestions, loading, error, clear } = useNominatimQuartier(value, countryCode);
-
-  const showDropdown = open && (suggestions.length > 0 || !!error);
-
-  return (
-    <div className="relative">
-      <div className="relative">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Tapez le nom du quartier…"
-          className={`${inputCls} pr-8`}
-        />
-        {loading && (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin pointer-events-none" />
-        )}
-      </div>
-      {showDropdown && (
-        <ul className="absolute top-full left-0 right-0 z-[200] mt-1 bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden">
-          {error && (
-            <li className="flex items-center gap-2 px-4 py-3 text-sm text-red-500">
-              <AlertCircle className="w-4 h-4" />{error}
-            </li>
-          )}
-          {!error && suggestions.map((s) => (
-            <li key={s.placeId}>
-              <button
-                type="button"
-                onMouseDown={() => {
-                  onSelect(s.lat, s.lon, s.nom);
-                  onChange(s.nom);
-                  clear();
-                  setOpen(false);
-                }}
-                className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-[#D4A843]/8 hover:text-[#0C1A35] border-b border-slate-100 last:border-0 transition-colors flex items-center gap-2.5"
-              >
-                <MapPin className="w-4 h-4 text-[#D4A843] flex-shrink-0" />
-                {s.nom}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 // ─── Modal formulaire ─────────────────────────────────────────────────────────
 
@@ -112,13 +47,13 @@ function QuartierForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const { data: villesList = [] } = useAllVillesAdmin(paysId || undefined);
-  const countryCode = paysList.find((p) => p.id === paysId)?.code?.toLowerCase() ?? "sn";
 
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!villeId) errs.villeId = "Choisissez une ville";
     if (!nom.trim()) errs.nom = "Le nom est requis";
-    if (latitude == null) errs.coords = "Sélectionnez le quartier depuis les suggestions pour obtenir les coordonnées GPS";
+    if (latitude == null || isNaN(latitude)) errs.latitude = "La latitude est requise";
+    if (longitude == null || isNaN(longitude)) errs.longitude = "La longitude est requise";
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -135,7 +70,7 @@ function QuartierForm({
         toast.success("Quartier mis à jour");
       } else {
         await create.mutateAsync({ nom: nom.trim(), villeId, latitude: latitude!, longitude: longitude! });
-        toast.success("Quartier créé avec coordonnées GPS");
+        toast.success("Quartier créé");
       }
       onClose();
     } catch (err: unknown) {
@@ -199,56 +134,46 @@ function QuartierForm({
             {errors.villeId && <p className="mt-1 text-xs text-red-500 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.villeId}</p>}
           </div>
 
-          {/* Nom avec Nominatim */}
+          {/* Nom */}
           <div>
-            <label className={labelCls}>
-              Nom du quartier *
-              <span className="ml-1 text-slate-400 font-normal">(sélectionnez depuis les suggestions pour auto-capturer le GPS)</span>
-            </label>
-            <NominatimInput
+            <label className={labelCls}>Nom du quartier *</label>
+            <input
+              type="text"
               value={nom}
-              countryCode={countryCode}
-              onChange={(v) => {
-                setNom(v);
-                setLatitude(null);
-                setLongitude(null);
-              }}
-              onSelect={(lat, lon, name) => {
-                setLatitude(lat);
-                setLongitude(lon);
-                setNom(name);
-              }}
+              onChange={(e) => setNom(e.target.value)}
+              placeholder="Ex : Almadies"
+              className={inputCls}
             />
             {errors.nom && <p className="mt-1 text-xs text-red-500 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.nom}</p>}
           </div>
 
-          {/* Coordonnées GPS (lecture seule) */}
+          {/* Coordonnées GPS (Manuelles) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Latitude</label>
-              <div className={`${inputCls} flex items-center ${latitude != null ? "text-emerald-600 font-medium bg-emerald-50 border-emerald-200" : "text-slate-300"}`}>
-                {latitude != null ? latitude.toFixed(6) : ""}
-              </div>
+              <label className={labelCls}>Latitude *</label>
+              <input
+                type="number"
+                step="any"
+                value={latitude !== null ? latitude : ""}
+                onChange={(e) => setLatitude(e.target.value ? parseFloat(e.target.value) : null)}
+                placeholder="Ex : 14.716677"
+                className={inputCls}
+              />
+              {errors.latitude && <p className="mt-1 text-xs text-red-500 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.latitude}</p>}
             </div>
             <div>
-              <label className={labelCls}>Longitude</label>
-              <div className={`${inputCls} flex items-center ${longitude != null ? "text-emerald-600 font-medium bg-emerald-50 border-emerald-200" : "text-slate-300"}`}>
-                {longitude != null ? longitude.toFixed(6) : ""}
-              </div>
+              <label className={labelCls}>Longitude *</label>
+              <input
+                type="number"
+                step="any"
+                value={longitude !== null ? longitude : ""}
+                onChange={(e) => setLongitude(e.target.value ? parseFloat(e.target.value) : null)}
+                placeholder="Ex : -17.467686"
+                className={inputCls}
+              />
+              {errors.longitude && <p className="mt-1 text-xs text-red-500 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.longitude}</p>}
             </div>
           </div>
-          {errors.coords && (
-            <p className="text-xs text-amber-600 flex items-start gap-1">
-              <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{errors.coords}
-            </p>
-          )}
-
-          {latitude != null && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-medium">
-              <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-              Coordonnées GPS capturées automatiquement
-            </div>
-          )}
 
           <div className="flex gap-3 pt-2">
             <button
@@ -311,7 +236,7 @@ export default function QuartiersPage() {
           </div>
           <h1 className="font-display text-2xl font-bold text-[#0C1A35]">Quartiers</h1>
           <p className="text-slate-400 text-sm mt-0.5">
-            Les coordonnées GPS sont capturées automatiquement lors de la création.
+            Gérez la liste des quartiers et leurs coordonnées GPS.
           </p>
         </div>
         <button
