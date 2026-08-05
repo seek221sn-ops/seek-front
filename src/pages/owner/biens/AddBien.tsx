@@ -8,7 +8,6 @@ import {
   ArrowLeftRight, CircleDot, Check, ChevronLeft, ChevronDown,
   PawPrint, Cigarette, WifiIcon, Search, Star, ArrowLeft, Lock, Video,
 } from "lucide-react";
-import MapPicker, { type MapPickerValue, type GeocodingData } from "@/components/form/MapPicker";
 import { useTypeLogements } from "@/hooks/useTypeLogements";
 import { useTypeTransactions } from "@/hooks/useTypeTransactions";
 import { useStatutsBien } from "@/hooks/useStatutsBien";
@@ -197,7 +196,6 @@ export default function AddBien() {
   const [longitude,        setLongitude]        = useState<number | null>(null);
   const [adresse,          setAdresse]          = useState<string>("");
   const [pointRepere,      setPointRepere]      = useState<string>("");
-  const [pendingGeoMatch,  setPendingGeoMatch]  = useState<GeocodingData | null>(null);
   const [description,      setDescription]      = useState("");
 
   // ── Onglet 2 : Caractéristiques ──
@@ -373,47 +371,6 @@ export default function AddBien() {
       setLongitude(q.longitude);
     }
   }, [bienToEdit, quartiersList, quartiersLoading, selectedQuartier]);
-
-  // ── Auto-remplissage depuis la carte (cascade pays → ville → quartier) ──
-  useEffect(() => {
-    if (!pendingGeoMatch || !paysList.length) return;
-    const match = paysList.find((p) =>
-      (pendingGeoMatch.countryCode && p.code?.toUpperCase() === pendingGeoMatch.countryCode) ||
-      (pendingGeoMatch.country && p.nom.toLowerCase() === pendingGeoMatch.country.toLowerCase())
-    );
-    if (match && match.id !== selectedPays?.id) {
-      setSelectedPays(match);
-      setSelectedVille(null);
-      setSelectedQuartier(null);
-    }
-  }, [pendingGeoMatch, paysList]);
-
-  useEffect(() => {
-    if (!pendingGeoMatch?.city || !villesList.length || !selectedPays) return;
-    const needle = pendingGeoMatch.city.toLowerCase();
-    const match = villesList.find((v) =>
-      v.nom.toLowerCase().includes(needle) || needle.includes(v.nom.toLowerCase())
-    );
-    if (match && match.id !== selectedVille?.id) {
-      setSelectedVille(match);
-      setSelectedQuartier(null);
-    }
-  }, [pendingGeoMatch, villesList, selectedPays]);
-
-  useEffect(() => {
-    if (!pendingGeoMatch?.quartierCandidates?.length || !quartiersList.length || !selectedVille) return;
-    let match: Quartier | undefined;
-    for (const candidate of pendingGeoMatch.quartierCandidates) {
-      const needle = candidate.toLowerCase();
-      match = quartiersList.find((q) =>
-        q.nom.toLowerCase().includes(needle) || needle.includes(q.nom.toLowerCase())
-      );
-      if (match) break;
-    }
-    if (match && match.id !== selectedQuartier?.id) {
-      setSelectedQuartier(match);
-    }
-  }, [pendingGeoMatch, quartiersList, selectedVille]);
 
   const currentComparable = JSON.stringify({
     titre: titre.trim() || null,
@@ -676,6 +633,7 @@ export default function AddBien() {
       }
       if (!selectedPays)  errs.pays   = "Choisissez un pays";
       if (!selectedVille) errs.region = "Choisissez une région";
+      if (!selectedQuartier) errs.quartier = "Choisissez un quartier";
     }
     if (tabId === "specifiques") {
       const dynErrs = validateDynamicValues(customChamps, champsValeurs);
@@ -975,7 +933,6 @@ export default function AddBien() {
                         <select
                           value={selectedPays?.id ?? ""}
                           onChange={(e) => {
-                            setPendingGeoMatch(null);
                             const found = paysList.find((p) => p.id === e.target.value) ?? null;
                             setSelectedPays(found);
                             setSelectedVille(null);
@@ -1005,7 +962,6 @@ export default function AddBien() {
                         <select
                           value={selectedVille?.id ?? ""}
                           onChange={(e) => {
-                            setPendingGeoMatch(null);
                             const found = villesList.find((v) => v.id === e.target.value) ?? null;
                             setSelectedVille(found);
                             setSelectedQuartier(null);
@@ -1031,7 +987,7 @@ export default function AddBien() {
 
                 {/* Quartier - select depuis la DB */}
                 <div>
-                  <label className={labelCls}>Quartier</label>
+                  <label className={labelCls}>Quartier *</label>
                   {quartiersLoading ? (
                     <div className="flex items-center gap-2 h-10 text-slate-400 text-sm">
                       <Loader2 className="w-4 h-4 animate-spin" /> Chargement…
@@ -1041,7 +997,6 @@ export default function AddBien() {
                       <select
                         value={selectedQuartier?.id ?? ""}
                         onChange={(e) => {
-                          setPendingGeoMatch(null);
                           const q = quartiersList.find((q) => q.id === e.target.value) ?? null;
                           setSelectedQuartier(q);
                           setLatitude(q?.latitude ?? null);
@@ -1064,6 +1019,7 @@ export default function AddBien() {
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     </div>
                   )}
+                  {errors.quartier && <p className="mt-1 text-xs text-red-500">{errors.quartier}</p>}
                 </div>
 
                 {/* Adresse précise */}
@@ -1088,36 +1044,6 @@ export default function AddBien() {
                     placeholder="Ex : En face de la pharmacie centrale"
                     className={inputCls}
                   />
-                </div>
-
-                {/* Carte interactive */}
-                <div>
-                  <label className={labelCls}>
-                    Position sur la carte
-                    <span className="ml-1 text-slate-400 font-normal">(optionnel — cliquez ou faites glisser le marqueur)</span>
-                  </label>
-                  <MapPicker
-                    value={latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : null}
-                    onChange={(v: MapPickerValue) => {
-                      setLatitude(v.lat);
-                      setLongitude(v.lng);
-                      if (v.geocoding?.adresse) setAdresse(v.geocoding.adresse);
-                      if (v.geocoding) setPendingGeoMatch(v.geocoding);
-                    }}
-                  />
-                  {latitude !== null && longitude !== null && (
-                    <p className="mt-1.5 text-xs text-slate-400 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {latitude.toFixed(6)}, {longitude.toFixed(6)}
-                      <button
-                        type="button"
-                        onClick={() => { setLatitude(null); setLongitude(null); }}
-                        className="ml-2 text-red-400 hover:text-red-600 underline"
-                      >
-                        Effacer
-                      </button>
-                    </p>
-                  )}
                 </div>
 
               </div>
